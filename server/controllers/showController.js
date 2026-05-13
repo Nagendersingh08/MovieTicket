@@ -3,18 +3,68 @@ import Movie from "../models/Movie.js";
 import Show from "../models/Show.js";
 import { inngest } from "../inngest/index.js";
 
+const TMDB_HEADERS = {
+    Authorization: `Bearer ${process.env.TMDB_API_KEY}`
+};
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableTmdbError = (error) => {
+    return [
+        "ECONNRESET",
+        "ECONNABORTED",
+        "ETIMEDOUT",
+        "ENOTFOUND",
+        "EAI_AGAIN"
+    ].includes(error.code) || (error.response?.status >= 500);
+};
+
+const fetchTmdbWithRetry = async (url, attempt = 1) => {
+    try {
+        return await axios.get(url, {
+            headers: TMDB_HEADERS,
+            timeout: 10000
+        });
+    } catch (error) {
+        if (attempt < 3 && isRetryableTmdbError(error)) {
+            await wait(700 * attempt);
+            return fetchTmdbWithRetry(url, attempt + 1);
+        }
+
+        throw error;
+    }
+};
+
 // API to get now playing movies from TMDB API
 export const getNowPlayingMovies = async (req, res)=>{
     try {
-        const { data } = await axios.get('https://api.themoviedb.org/3/movie/now_playing', {
-            headers: {Authorization : `Bearer ${process.env.TMDB_API_KEY}`}
-        })
+        const { data } = await fetchTmdbWithRetry('https://api.themoviedb.org/3/movie/now_playing');
 
-        const movies = data.results;
-        res.json({success: true, movies: movies})
+        const movies = data.results || [];
+        res.json({success: true, movies})
     } catch (error) {
         console.error(error);
-        res.json({success: false, message: error.message})
+
+        try {
+            const fallbackMovies = await Movie.find({})
+                .sort({ release_date: -1, createdAt: -1 })
+                .limit(20);
+
+            if (fallbackMovies.length > 0) {
+                return res.json({
+                    success: true,
+                    movies: fallbackMovies,
+                    fallback: true
+                });
+            }
+        } catch (fallbackError) {
+            console.error(fallbackError);
+        }
+
+        res.json({
+            success: false,
+            message: 'Unable to load movies from TMDB right now. Please try again in a moment.'
+        })
     }
 }
 
@@ -28,11 +78,8 @@ export const addShow = async (req, res) =>{
         if(!movie) {
             // Fetch movie details and credits from TMDB API
             const [movieDetailsResponse, movieCreditsResponse] = await Promise.all([
-                axios.get(`https://api.themoviedb.org/3/movie/${movieId}`, {
-            headers: {Authorization : `Bearer ${process.env.TMDB_API_KEY}`} }),
-
-                axios.get(`https://api.themoviedb.org/3/movie/${movieId}/credits`, {
-            headers: {Authorization : `Bearer ${process.env.TMDB_API_KEY}`} })
+                fetchTmdbWithRetry(`https://api.themoviedb.org/3/movie/${movieId}`),
+                fetchTmdbWithRetry(`https://api.themoviedb.org/3/movie/${movieId}/credits`)
             ]);
 
             const movieApiData = movieDetailsResponse.data;
@@ -84,7 +131,12 @@ export const addShow = async (req, res) =>{
         res.json({success: true, message: 'Show Added successfully.'})
     } catch (error) {
         console.error(error);
-        res.json({success: false, message: error.message})
+        res.json({
+            success: false,
+            message: isRetryableTmdbError(error)
+                ? 'Movie service is temporarily unstable. Please try adding the show again.'
+                : error.message
+        })
     }
 }
 

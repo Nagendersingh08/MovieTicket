@@ -3,7 +3,7 @@ import User from "../models/User.js";
 import Booking from "../models/Booking.js";
 import Show from "../models/Show.js";
 import sendEmail from "../configs/nodeMailer.js";
-import { set } from "mongoose";
+import { buildDisplayName } from "../utils/userSync.js";
 
 // Create a client to send and receive events
 export const inngest = new Inngest({ id: "movie-ticket-booking" });
@@ -13,14 +13,25 @@ const syncUserCreation = inngest.createFunction(
     {id: 'sync-user-from-clerk'},
     { event: 'clerk/user.created' },
     async ({ event })=>{
-        const {id, first_name, last_name, email_addresses, image_url} = event.data
+        const {id, first_name, last_name, full_name, username, email_addresses, image_url} = event.data
+        const email = email_addresses[0]?.email_address || "";
         const userData = {
             _id: id,
-            email: email_addresses[0].email_address,
-            name: first_name + ' ' + last_name,
+            email,
+            name: buildDisplayName({
+                firstName: first_name,
+                lastName: last_name,
+                fullName: full_name,
+                username,
+                email,
+            }),
             image: image_url
         }
-        await User.create(userData)
+        await User.findByIdAndUpdate(id, userData, {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+        })
     }
 )
 
@@ -40,14 +51,25 @@ const syncUserUpdation = inngest.createFunction(
     {id: 'update-user-from-clerk'},
     { event: 'clerk/user.updated' },
     async ({ event })=>{
-        const { id, first_name, last_name, email_addresses, image_url } = event.data
+        const { id, first_name, last_name, full_name, username, email_addresses, image_url } = event.data
+        const email = email_addresses[0]?.email_address || "";
         const userData = {
             _id: id,
-            email: email_addresses[0].email_address,
-            name: first_name + ' ' + last_name,
+            email,
+            name: buildDisplayName({
+                firstName: first_name,
+                lastName: last_name,
+                fullName: full_name,
+                username,
+                email,
+            }),
             image: image_url
         }
-        await User.findByIdAndUpdate(id, userData)
+        await User.findByIdAndUpdate(id, userData, {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+        })
     }
 )
 
@@ -100,7 +122,7 @@ const sendBookingConfirmationEmail = inngest.createFunction(
                             <strong>Time:</strong> ${new Date(booking.show.showDateTime).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' })}
                         </p>
                         <p>Enjoy the show! 🍿</p>
-                        <p>Thanks for booking with us!<br/>— QuickShow Team</p>
+                        <p>Thanks for booking with us!<br/>— MovieTicket Team</p>
                     </div>`
         })
     }
@@ -164,7 +186,7 @@ const sendShowReminders = inngest.createFunction(
                             </p>
                             <p>It starts in approximately <strong>8 hours</strong> - make sure you're ready!</p>
                             <br/>
-                            <p>Enjoy the show!<br/>QuickShow Team</p>
+                            <p>Enjoy the show!<br/>MovieTicket Team</p>
                         </div>`
                 }))
             )
@@ -201,7 +223,7 @@ const sendNewShowNotifications = inngest.createFunction(
                     <h3 style="color: #F84565;">"${movieTitle}"</h3>
                     <p>Visit our website</p>
                     <br/>
-                    <p>Thanks,<br/>QuickShow Team</p>
+                    <p>Thanks,<br/>MovieTicket Team</p>
                 </div>`;
 
                 await sendEmail({

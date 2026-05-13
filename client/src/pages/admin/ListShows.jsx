@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react'
-import { dummyShowsData } from '../../assets/assets';
 import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
 import { dateFormat } from '../../lib/dateFormat';
@@ -19,11 +18,16 @@ const ListShows = () => {
             const { data } = await axios.get("/api/admin/all-shows", {
                 headers: { Authorization: `Bearer ${await getToken()}` }
             });
-            setShows(data.shows)
-            setLoading(false);
+            if (data.success) {
+                setShows(data.shows || []);
+            } else {
+                setShows([]);
+            }
         } catch (error) {
             console.error(error);
+            setShows([]);
         }
+        setLoading(false);
     }
 
     useEffect(() => {
@@ -48,10 +52,10 @@ const ListShows = () => {
             <tbody className="text-sm font-light">
                 {shows.map((show, index) => (
                     <tr key={index} className="border-b border-primary/10 bg-primary/5 even:bg-primary/10">
-                        <td className="p-2 min-w-45 pl-5">{show.movie.title}</td>
-                        <td className="p-2">{dateFormat(show.showDateTime)}</td>
-                        <td className="p-2">{Object.keys(show.occupiedSeats).length}</td>
-                        <td className="p-2">{currency} {Object.keys(show.occupiedSeats).length * show.showPrice}</td>
+                        <td className="p-2 min-w-45 pl-5">{show.movie?.title || "Movie unavailable"}</td>
+                        <td className="p-2">{show.showDateTime ? dateFormat(show.showDateTime) : "Unavailable"}</td>
+                        <td className="p-2">{Object.keys(show.occupiedSeats || {}).length}</td>
+                        <td className="p-2">{currency} {Object.keys(show.occupiedSeats || {}).length * (show.showPrice || 0)}</td>
                     </tr>
                 ))}
             </tbody>
